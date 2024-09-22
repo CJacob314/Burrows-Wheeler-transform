@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::VecDeque;
 use std::fmt;
+use std::io;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BWTByte {
@@ -119,6 +120,56 @@ impl BWTStr {
         }
     }
 
+    pub fn rle_write<F: io::Write>(&self, f: &mut F) -> io::Result<()> {
+        use io::{BufWriter, Write};
+        use BWTByte::*;
+
+        // First, create a BufWriter
+        let mut writer = BufWriter::new(f);
+
+        // Write first the position of the sentinal character
+        writer.write(self.sentinel_index.to_le_bytes().as_slice())?;
+
+        // Now, the run-length encoding
+        let mut iter = self.inner.iter().peekable();
+        while let Some(b) = iter.peek() {
+            match **b {
+                Byte(b) => {
+                    let mut cnt = 1_u16;
+                    iter.next(); // Consume this occurrence of b
+
+                    while let Some(ibwt) = iter.peek() {
+                        if ibwt.is_byte_and(|byte| byte == &b) {
+                            cnt += 1;
+                            iter.next();
+                        } else {
+                            break;
+                        }
+
+                        // We only write two bytes for the run-length
+                        if cnt == u16::MAX {
+                            writer.write(&[b])?;
+                            writer.write(cnt.to_le_bytes().as_slice())?;
+                            cnt = 0;
+                        }
+                    }
+
+                    // Byte b occurred cnt times in a row before we got to some other byte
+                    // Write the byte first, then two bytes for the number of times we saw it
+                    writer.write(&[b])?;
+                    writer.write(cnt.to_le_bytes().as_slice())?;
+                }
+                Sentinel => {
+                    iter.next();
+                    continue;
+                }
+            }
+        }
+
+        writer.flush()?;
+        Ok(())
+    }
+
     fn rotate(&mut self) {
         if self.inner.is_empty() {
             return;
@@ -224,5 +275,25 @@ impl cmp::PartialOrd for BWTByte {
 impl cmp::Ord for BWTByte {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.partial_cmp(other).unwrap()
+    }
+}
+
+impl BWTByte {
+    fn is_sentinel(&self) -> bool {
+        use BWTByte::*;
+
+        match self {
+            Byte(_) => false,
+            Sentinel => true,
+        }
+    }
+
+    fn is_byte_and<P: FnOnce(&u8) -> bool>(&self, predicate: P) -> bool {
+        use BWTByte::*;
+
+        match self {
+            Sentinel => false,
+            Byte(b) => predicate(b),
+        }
     }
 }
