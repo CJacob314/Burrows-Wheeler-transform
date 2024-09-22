@@ -14,7 +14,8 @@ fn main() {
             .filter_map(|parse_result| parse_result.ok())
             .collect::<Vec<_>>();
 
-        let bwt = BWTString::new(bytes).forward_transform();
+        let bwt = BWTStr::new(bytes).forward_transform();
         println!("Burrows-Wheeler transform: {bwt}");
+        println!("Back to original? {}", bwt.reverse_transform());
     }
 }
