@@ -1,6 +1,7 @@
 mod bwtstring;
 use bwtstring::*;
 
+use std::fs;
 use std::io::{self, BufRead};
 
 // Simple interactive testing code
@@ -17,5 +18,17 @@ fn main() {
         let bwt = BWTStr::new(bytes).forward_transform();
         println!("Burrows-Wheeler transform: {bwt}");
         println!("Back to original? {}", bwt.reverse_transform());
+
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("test.bwt")
+            .unwrap();
+
+        bwt.rle_write(&mut file).unwrap();
+
+        assert_eq!(bwt, BWTStr::rle_read(&mut file).unwrap());
     }
 }

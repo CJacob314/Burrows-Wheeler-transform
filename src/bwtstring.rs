@@ -9,7 +9,7 @@ enum BWTByte {
     Sentinel,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BWTStr {
     inner: VecDeque<BWTByte>,
     sentinel_index: usize,
@@ -31,17 +31,17 @@ impl BWTStr {
         }
     }
 
-    pub fn new_with_sentinal(inner: impl Into<VecDeque<u8>>, sentinal_index: usize) -> Self {
+    pub fn new_with_sentinel(inner: impl Into<VecDeque<u8>>, sentinel_index: usize) -> Self {
         let mut inner = inner
             .into()
             .iter()
             .map(|b| BWTByte::Byte(*b))
             .collect::<VecDeque<_>>();
-        inner.insert(sentinal_index, BWTByte::Sentinel);
+        inner.insert(sentinel_index, BWTByte::Sentinel);
 
         Self {
             inner,
-            sentinel_index: sentinal_index,
+            sentinel_index,
         }
     }
 
@@ -59,14 +59,14 @@ impl BWTStr {
             })
             .collect();
 
-        let sentinal_index = rotations
+        let sentinel_index = rotations
             .iter()
             .position(|rotation| rotation.sentinel_index == self.len())
             .unwrap();
 
         Self {
             inner,
-            sentinel_index: sentinal_index,
+            sentinel_index: sentinel_index,
         }
     }
 
@@ -113,21 +113,63 @@ impl BWTStr {
             }
         }
 
-        let sentinal_index = inner.len();
+        let sentinel_index = inner.len();
         Self {
             inner,
-            sentinel_index: sentinal_index,
+            sentinel_index,
         }
     }
 
-    pub fn rle_write<F: io::Write>(&self, f: &mut F) -> io::Result<()> {
-        use io::{BufWriter, Write};
+    pub fn rle_read<F: io::Read + io::Seek>(f: &mut F) -> io::Result<Self> {
+        use io::{BufRead, BufReader, Read, SeekFrom};
         use BWTByte::*;
+
+        const READ_BUFFER_CAP: usize = 1 << 16; // 64 KiB
+        const USIZE_BYTE_CNT: u32 = usize::BITS / 8;
+
+        f.seek(SeekFrom::Start(0))?;
+
+        // Create BufReader
+        let mut reader = BufReader::with_capacity(READ_BUFFER_CAP, f);
+
+        // Read sentinel index bytes and parse into usize
+        let mut sentinel_index_bytes = [0u8; USIZE_BYTE_CNT as _];
+        assert_eq!(reader.read(&mut sentinel_index_bytes)?, 8);
+        let sentinel_index = usize::from_le_bytes(sentinel_index_bytes);
+
+        let mut inner = VecDeque::new();
+        let mut count_bytes = [0u8; 2];
+
+        // Loop until end of input
+        while let Ok(Some(byte)) = reader.fill_buf().map(|buf| buf.get(0).cloned()) {
+            reader.consume(1);
+
+            // Read run-length
+            reader.read_exact(&mut count_bytes)?;
+            let count = u16::from_le_bytes(count_bytes);
+
+            inner.extend(std::iter::repeat(Byte(byte)).take(count as usize));
+        }
+
+        // Insert sentintel
+        inner.insert(sentinel_index, Sentinel);
+
+        Ok(Self {
+            sentinel_index,
+            inner,
+        })
+    }
+
+    pub fn rle_write<F: io::Write + io::Seek>(&self, f: &mut F) -> io::Result<()> {
+        use io::{BufWriter, SeekFrom, Write};
+        use BWTByte::*;
+
+        f.seek(SeekFrom::Start(0)).unwrap();
 
         // First, create a BufWriter
         let mut writer = BufWriter::new(f);
 
-        // Write first the position of the sentinal character
+        // Write first the position of the sentinel character
         writer.write(self.sentinel_index.to_le_bytes().as_slice())?;
 
         // Now, the run-length encoding
@@ -179,7 +221,7 @@ impl BWTStr {
         let front = self.inner.pop_front().unwrap();
         self.inner.push_back(front);
 
-        // Update sentinal_index
+        // Update sentinel_index
         self.sentinel_index = (self.sentinel_index + self.len() - 1) % self.len();
     }
 
