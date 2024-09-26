@@ -4,14 +4,14 @@ use std::fmt;
 use std::io;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum BWTByte {
+pub(crate) enum BWTByte {
     Byte(u8),
     Sentinel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BWTStr {
-    inner: VecDeque<BWTByte>,
+    pub(crate) inner: VecDeque<BWTByte>,
     sentinel_index: usize,
 }
 
@@ -160,11 +160,9 @@ impl BWTStr {
         })
     }
 
-    pub fn rle_write<F: io::Write + io::Seek>(&self, f: &mut F) -> io::Result<()> {
-        use io::{BufWriter, SeekFrom, Write};
+    pub fn rle_write<F: io::Write>(&self, f: &mut F) -> io::Result<()> {
+        use io::{BufWriter, Write};
         use BWTByte::*;
-
-        f.seek(SeekFrom::Start(0)).unwrap();
 
         // First, create a BufWriter
         let mut writer = BufWriter::new(f);
